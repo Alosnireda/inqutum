@@ -200,11 +200,21 @@ Open the app at `http://localhost:3000`.
 - `FRONTEND_URL` in `backend/.env` must match the frontend origin for CORS; the provided MVP env uses `http://localhost:3000`.
 - `NEXT_PUBLIC_API_URL` in `frontend/.env.local` must include `/api`; the provided MVP env uses `http://localhost:3001/api`.
 
-### Env reference
+### Contributor Diagnostics & Health Checks
 
-- Backend MVP template: `backend/env.mvp.example` → copy to `backend/.env`
-- Frontend MVP template: `frontend/env.mvp.local` → copy to `frontend/.env.local`
-- Full frontend template: `frontend/env.example.txt`
+Verify your development environment, required tools, configuration, and dependencies with one command:
+
+```bash
+cd backend
+npm run diagnostics
+```
+
+Or from repository root:
+```bash
+npx tsx scripts/diagnostics.ts
+```
+
+This read-only check verifies Node.js engine compatibility, project structure, typed environment configuration, and network reachability. Full details: [`docs/diagnostics.md`](docs/diagnostics.md).
 
 ---
 
