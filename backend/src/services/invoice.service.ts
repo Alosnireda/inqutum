@@ -42,6 +42,7 @@ export interface Invoice {
   paidAt?: Date;
   expiresAt: Date;
   metadata?: any;
+  version?: number;
 }
 
 export class InvoiceService {

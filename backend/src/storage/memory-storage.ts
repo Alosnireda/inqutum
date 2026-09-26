@@ -34,7 +34,9 @@ class MemoryStorage {
     this.invoices.set(invoice.id, invoice);
     this.invoicesByMemo.set(invoice.memo, invoice.id);
 
-    console.log('✅ Invoice created in memory:', invoice.id);
+    if (process.env.NODE_ENV !== 'test') {
+      console.log('✅ Invoice created in memory:', invoice.id);
+    }
     return invoice;
   }
 

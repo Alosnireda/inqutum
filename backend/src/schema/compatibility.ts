@@ -105,7 +105,7 @@ export function transformForRead(
     version = step.to;
   }
 
-  return versionStamp(current) as VersionedRecord<StoredInvoice>;
+  return versionStamp(current) as unknown as VersionedRecord<StoredInvoice>;
 }
 
 /**
