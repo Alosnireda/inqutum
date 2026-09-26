@@ -24,6 +24,7 @@ import { simulationAllowed } from '../config/runtime';
 import { metrics } from '../observability/telemetry';
 import { exportAuditEvents, AuditAction } from '../audit/audit-service';
 import { classifyError } from '../errors/error-taxonomy';
+import { ConflictError } from '../concurrency/optimistic-lock';
 import { safeFrontendOrigin } from '../security/content-safety';
 import { NotificationService, notificationService } from '../notifications/notification-service';
 import type { VerificationCode } from '../services/payment-verification';
@@ -261,6 +262,9 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         });
 
         syncNotifications(invoice);
+        if (invoice.version !== undefined) {
+          res.setHeader('ETag', String(invoice.version));
+        }
         sendSuccess(res, 200, invoice);
       } catch (error: any) {
         const duration = performance.now() - start;
@@ -450,8 +454,9 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
 
       try {
+        const expectedVersion = req.body?.version ?? (req.headers['if-match'] ? Number(req.headers['if-match']) : undefined);
         const originalInvoice = await storage.getInvoiceById(req.params.id);
-        const invoice = await storage.cancelInvoice(req.params.id);
+        const invoice = await storage.cancelInvoice(req.params.id, expectedVersion);
 
         // Record audit trail event
         if (storage.recordAuditEvent) {
@@ -493,6 +498,23 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         sendSuccess(res, 200, invoice);
       } catch (error: any) {
         const duration = performance.now() - start;
+
+        if (error instanceof ConflictError) {
+          metrics.recordOperation({
+            operation: 'invoice.cancel',
+            actor_type: 'seller',
+            result: 'failure',
+            latency_ms: duration,
+            correlation_id: corrId,
+            http_status: 409,
+            error_code: 'CONFLICT',
+          });
+          return sendFailure(res, 409, error.message, {
+            code: 'CONFLICT',
+            correlationId: corrId,
+          });
+        }
+
         logError('Cancel invoice error:', error);
         const classified = classifyError(error);
 
@@ -643,13 +665,15 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           return sendVerificationFailure(res, 400, verification.code, verification.error, corrId);
         }
 
+        const paymentExpectedVersion = req.body?.version ?? (req.headers['if-match'] ? Number(req.headers['if-match']) : undefined);
         let updatedInvoice: StoredInvoice;
         try {
           updatedInvoice = await storage.markAsPaid(
             id,
             verification.value.txHash,
             verification.value.from,
-            payerCheck.value
+            payerCheck.value,
+            paymentExpectedVersion
           );
         } catch (error) {
           // The payment lookup can cross expiresAt after the first status read.
