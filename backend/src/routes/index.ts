@@ -9,6 +9,7 @@ import { createNotificationRouter } from './notification.routes';
 import { createObservabilityRouter } from './observability.routes';
 import { createJobsRouter } from './jobs.routes';
 import { createOpsRouter } from './ops.routes';
+import { createWebhookRouter } from './webhook.routes';
 import { PostgresJobStore } from '../jobs/postgres-job-store';
 import { pool } from '../config/database';
 import { healthHandler, readinessHandler } from '../health';
@@ -29,6 +30,10 @@ router.use(createExportRouter({ storage: postgresInvoiceStorage }));
 const jobStore = new PostgresJobStore(pool);
 router.use(createJobsRouter({ store: jobStore }));
 router.use(createOpsRouter({ storage: postgresInvoiceStorage, jobs: jobStore }));
+
+// Webhook routes (only mounted when WEBHOOK_SIGNING_SECRET is set)
+const webhookRouter = createWebhookRouter({});
+if (webhookRouter) router.use(webhookRouter);
 
 // Stellar routes
 router.get('/stellar/account', stellarController.getAccountInfo.bind(stellarController));
