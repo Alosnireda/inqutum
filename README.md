@@ -379,6 +379,7 @@ issue a credit asset coded `USDC`, or even `XLM`. How invoices name assets and
 how settlement compares them is documented in
 [`docs/ASSETS.md`](./docs/ASSETS.md) and [`docs/VERIFY.md`](./docs/VERIFY.md).
 Background jobs (retries, dead-letter queue, running workers): [`docs/JOBS.md`](./docs/JOBS.md).
+Stuck jobs and payments: [`docs/PARTIAL-FAILURES.md`](./docs/PARTIAL-FAILURES.md). Business rules: [`docs/POLICY.md`](./docs/POLICY.md). Activity timeline: [`docs/ACTIVITY-TIMELINE.md`](./docs/ACTIVITY-TIMELINE.md). Sandbox mode: [`docs/SANDBOX.md`](./docs/SANDBOX.md).
 Accessibility conventions and checks: [`docs/ACCESSIBILITY.md`](./docs/ACCESSIBILITY.md).
 Notifications: [`docs/NOTIFICATIONS.md`](./docs/NOTIFICATIONS.md). Data exports: [`docs/EXPORTS.md`](./docs/EXPORTS.md). Untrusted content and URL handling: [`docs/CONTENT_SAFETY.md`](./docs/CONTENT_SAFETY.md).
 
