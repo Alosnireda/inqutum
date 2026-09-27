@@ -6,6 +6,7 @@ import { createInvoiceRouter } from './invoice.routes';
 import { createAuditRouter } from './audit.routes';
 import { createExportRouter } from './export.routes';
 import { createNotificationRouter } from './notification.routes';
+import { createEmailRouter } from './email.routes';
 import { createObservabilityRouter } from './observability.routes';
 import { createJobsRouter } from './jobs.routes';
 import { createOpsRouter } from './ops.routes';
@@ -25,6 +26,7 @@ router.use(createInvoiceRouter({ storage: postgresInvoiceStorage }));
 router.use(createAuditRouter({ storage: postgresInvoiceStorage }));
 router.use(createObservabilityRouter({ storage: postgresInvoiceStorage }));
 router.use(createNotificationRouter());
+router.use(createEmailRouter());
 router.use(createExportRouter({ storage: postgresInvoiceStorage }));
 
 const jobStore = new PostgresJobStore(pool);
