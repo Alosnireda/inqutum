@@ -21,6 +21,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
     "diagnostics": "tsx ../scripts/diagnostics.ts",
+    "evidence:pack": "tsx ../scripts/generate-evidence-pack.ts",
+    "evidence:check": "tsx ../scripts/generate-evidence-pack.ts --check",
     "typecheck": "tsc --noEmit"
   },
   "engines": {
