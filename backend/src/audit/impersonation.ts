@@ -307,10 +307,10 @@ export class ImpersonationService {
   }
 
   listSessions(includeClosed = true): ImpersonationSession[] {
-    const all = Array.from(this.sessions.values());
-    this.sessions.forEach((session) => this.expireIfDue(session, this.now()));
-    const filtered = includeClosed ? all : Array.from(this.sessions.values()).filter((s) => !s.endedAt);
-    return filtered.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    const nowMs = this.now();
+    for (const session of this.sessions.values()) this.expireIfDue(session, nowMs);
+    const all = Array.from(this.sessions.values()).filter((s) => includeClosed || !s.endedAt);
+    return all.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
 
   /** Closes every session past its expiry. Returns the ids that were expired. */
