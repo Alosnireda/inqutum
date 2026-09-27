@@ -32,7 +32,9 @@ export class InvoiceMemoryService {
       expiresAt,
     });
 
-    console.log('✅ Invoice created:', invoice.id);
+    if (process.env.NODE_ENV !== 'test') {
+      console.log('✅ Invoice created:', invoice.id);
+    }
     return invoice;
   }
 

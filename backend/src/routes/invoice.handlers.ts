@@ -27,6 +27,7 @@ import { classifyError } from '../errors/error-taxonomy';
 import { ConflictError } from '../concurrency/optimistic-lock';
 import { safeFrontendOrigin } from '../security/content-safety';
 import { NotificationService, notificationService } from '../notifications/notification-service';
+import { EmailService, emailService, EmailTemplateType } from '../services/email.service';
 import type { VerificationCode } from '../services/payment-verification';
 
 /** Kept explicit so clients can tune polling without duplicating backend policy. */
@@ -46,6 +47,8 @@ export interface InvoiceHandlerOptions {
   stellar?: TransactionLookup;
   /** Defaults to the process-wide notification service. */
   notifications?: NotificationService;
+  /** Defaults to the process-wide email service. */
+  emailService?: EmailService;
 }
 
 export interface InvoiceHandlers {
@@ -62,6 +65,8 @@ export interface InvoiceHandlers {
   exportAuditTrail(req: Request, res: Response): Promise<void>;
   getObservabilityMetrics(req: Request, res: Response): Promise<void>;
   getPrometheusMetrics(req: Request, res: Response): Promise<void>;
+  getEmailPreview(req: Request, res: Response): Promise<void>;
+  sendInvoiceEmail(req: Request, res: Response): Promise<void>;
 }
 
 /**
@@ -93,6 +98,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
   const { storage } = options;
   const stellar: TransactionLookup = options.stellar || stellarService;
   const notifications = options.notifications ?? notificationService;
+  const emails = options.emailService ?? emailService;
 
   // Notifications are a side effect: a failure here must never fail the request.
   const safely = (label: string, fn: () => unknown) => {
@@ -262,7 +268,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
         });
 
         syncNotifications(invoice);
-        if (invoice.version !== undefined) {
+        if (invoice.version !== undefined && typeof res.setHeader === 'function') {
           res.setHeader('ETag', String(invoice.version));
         }
         sendSuccess(res, 200, invoice);
@@ -454,7 +460,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
 
       try {
-        const expectedVersion = req.body?.version ?? (req.headers['if-match'] ? Number(req.headers['if-match']) : undefined);
+        const expectedVersion = req.body?.version ?? (req.headers && req.headers['if-match'] ? Number(req.headers['if-match']) : undefined);
         const originalInvoice = await storage.getInvoiceById(req.params.id);
         const invoice = await storage.cancelInvoice(req.params.id, expectedVersion);
 
@@ -665,7 +671,7 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
           return sendVerificationFailure(res, 400, verification.code, verification.error, corrId);
         }
 
-        const paymentExpectedVersion = req.body?.version ?? (req.headers['if-match'] ? Number(req.headers['if-match']) : undefined);
+        const paymentExpectedVersion = req.body?.version ?? (req.headers && req.headers['if-match'] ? Number(req.headers['if-match']) : undefined);
         let updatedInvoice: StoredInvoice;
         try {
           updatedInvoice = await storage.markAsPaid(
@@ -1035,6 +1041,149 @@ export function createInvoiceHandlers(options: InvoiceHandlerOptions): InvoiceHa
       } catch (error: any) {
         logError('Prometheus metrics error:', error);
         res.status(500).send('# Error exporting metrics');
+      }
+    },
+
+    // Email Template Preview for freelancer verification before sending (Issue #36)
+    async getEmailPreview(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
+      try {
+        const { id } = req.params;
+        const invoice = await storage.getInvoiceById(id);
+
+        if (!invoice) {
+          return sendFailure(res, 404, 'Invoice not found', {
+            code: 'INVOICE_NOT_FOUND',
+            correlationId: corrId,
+          });
+        }
+
+        const templateType =
+          (req.query.type as EmailTemplateType) ||
+          (invoice.status === 'PAID' ? 'payment_proof' : 'payment_request');
+
+        if (templateType === 'payment_proof' && invoice.status !== 'PAID') {
+          return sendFailure(res, 400, 'Payment proof preview is only available for PAID invoices', {
+            code: 'INVOICE_NOT_PAID',
+            correlationId: corrId,
+          });
+        }
+
+        const preview = emails.getPreview(invoice, templateType, { frontendUrl: frontendUrl() });
+        const duration = performance.now() - start;
+
+        metrics.recordOperation({
+          operation: 'invoice.email_preview',
+          actor_type: 'seller',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: { invoiceId: invoice.id, templateType },
+        });
+
+        sendSuccess(res, 200, preview);
+      } catch (error: any) {
+        logError('Get email preview error:', error);
+        sendFailure(res, 500, error.message || 'Failed to generate email preview', {
+          correlationId: corrId,
+        });
+      }
+    },
+
+    // Secure Email Dispatch using Contextual Escaping (Issue #36)
+    async sendInvoiceEmail(req: Request, res: Response) {
+      const start = performance.now();
+      const corrId = req.correlationId || `req-${Date.now().toString(36)}`;
+
+      try {
+        const { id } = req.params;
+        const invoice = await storage.getInvoiceById(id);
+
+        if (!invoice) {
+          return sendFailure(res, 404, 'Invoice not found', {
+            code: 'INVOICE_NOT_FOUND',
+            correlationId: corrId,
+          });
+        }
+
+        const templateType =
+          (req.body?.templateType as EmailTemplateType) ||
+          (invoice.status === 'PAID' ? 'payment_proof' : 'payment_request');
+        const recipientEmail = req.body?.recipientEmail || invoice.customerEmail;
+
+        if (!recipientEmail) {
+          return sendFailure(res, 400, 'Recipient email address is required', {
+            code: 'RECIPIENT_EMAIL_REQUIRED',
+            correlationId: corrId,
+          });
+        }
+
+        if (templateType === 'payment_proof' && invoice.status !== 'PAID') {
+          return sendFailure(res, 400, 'Payment proof can only be sent for PAID invoices', {
+            code: 'INVOICE_NOT_PAID',
+            correlationId: corrId,
+          });
+        }
+
+        const result = await emails.sendInvoiceEmail(invoice, templateType, {
+          frontendUrl: frontendUrl(),
+          recipientEmail,
+        });
+
+        // Record audit trail event for sent email
+        if (storage.recordAuditEvent) {
+          try {
+            await storage.recordAuditEvent({
+              action: 'EMAIL_SENT' as any,
+              actor: {
+                type: 'seller',
+                id: invoice.sellerPublicKey,
+                ip: req.ip,
+                userAgent: getUserAgent(req),
+              },
+              scope: {
+                entityType: 'invoice',
+                entityId: invoice.id,
+              },
+              reason: `Invoice ${templateType} email dispatched to ${recipientEmail}`,
+              metadata: {
+                messageId: result.messageId,
+                recipient: recipientEmail,
+                templateType,
+                subject: result.subject,
+              },
+              correlationId: corrId,
+            });
+          } catch (auditErr) {
+            console.error('Audit log error on email dispatch:', auditErr);
+          }
+        }
+
+        const duration = performance.now() - start;
+        metrics.recordOperation({
+          operation: 'invoice.send_email',
+          actor_type: 'seller',
+          result: 'success',
+          latency_ms: duration,
+          correlation_id: corrId,
+          http_status: 200,
+          metadata: { invoiceId: invoice.id, templateType, messageId: result.messageId },
+        });
+
+        sendSuccess(res, 200, {
+          messageId: result.messageId,
+          recipient: result.recipient,
+          templateType,
+          sentAt: new Date().toISOString(),
+        });
+      } catch (error: any) {
+        logError('Send invoice email error:', error);
+        sendFailure(res, 500, error.message || 'Failed to send invoice email', {
+          correlationId: corrId,
+        });
       }
     },
   };
